@@ -32,7 +32,7 @@ readExpr :: String -> String
 readExpr input =
   case Parsec.parse parseExpr "lisp" input of
     Left err -> "No match: " ++ show err
-    Right val -> "Found Value"
+    Right _val -> "Found Value"
 
 {- Parsers -}
 parseAtom :: Parsec.Parser LispVal
@@ -48,22 +48,22 @@ parseAtom = do
 
 parseBinary :: Parsec.Parser LispVal
 parseBinary = do
-  Parsec.try $ Parsec.string "#b"
+  _ <- Parsec.try $ Parsec.string "#b"
   b <- Parsec.many1 $ Parsec.oneOf "10"
   return $ LispNumber (binaryToDecimal b)
 
 parseBool :: Parsec.Parser LispVal
 parseBool = do
-  Parsec.char '#'
+  _ <- Parsec.char '#'
   b <- Parsec.oneOf "tf"
   return $
-    case b of
-      't' -> LispBool True
-      'f' -> LispBool False
+    if b == 't'
+      then LispBool True
+      else LispBool False
 
 parseChar :: Parsec.Parser LispVal
 parseChar = do
-  Parsec.try (Parsec.string "#\\")
+  _ <- Parsec.try (Parsec.string "#\\")
   value <-
     Parsec.try (Parsec.string "newline" <|> Parsec.string "space") <|>
     anySingleChar
@@ -84,19 +84,19 @@ parseDecimal1 = do
 
 parseDecimal2 :: Parsec.Parser LispVal
 parseDecimal2 = do
-  Parsec.try $ Parsec.string "#d"
+  _ <- Parsec.try $ Parsec.string "#d"
   d <- Parsec.many1 Parsec.digit
   return $ LispNumber $ read d
 
 parseDottedList :: Parsec.Parser LispVal
 parseDottedList = do
-  head <- Parsec.endBy parseExpr spaces
-  tail <- Parsec.char '.' >> spaces >> parseExpr
-  return $ LispDottedList head tail
+  left <- Parsec.endBy parseExpr spaces
+  right <- Parsec.char '.' >> spaces >> parseExpr
+  return $ LispDottedList left right
 
 parseEscapeChars :: Parsec.Parser String
 parseEscapeChars = do
-  Parsec.char '\\'
+  _ <- Parsec.char '\\'
   x <- Parsec.oneOf "\"\\rnt"
   return $
     case x of
@@ -105,6 +105,7 @@ parseEscapeChars = do
       't' -> "\t"
       'n' -> "\n"
       'r' -> "r"
+      _ -> error $ "Not a valid escape char: " ++ [x]
 
 parseExpr :: Parsec.Parser LispVal
 parseExpr =
@@ -121,26 +122,26 @@ parseExpr =
   Parsec.try parseVectors
   where
     parseLists = do
-      Parsec.char '('
+      _ <- Parsec.char '('
       x <- Parsec.try parseList <|> parseDottedList
-      Parsec.char ')'
+      _ <- Parsec.char ')'
       return x
     parseVectors = do
-      Parsec.string "#("
+      _ <- Parsec.string "#("
       x <- parseVector
-      Parsec.char ')'
+      _ <- Parsec.char ')'
       return x
 
 parseFloat :: Parsec.Parser LispVal
 parseFloat = do
   d1 <- Parsec.many1 Parsec.digit
-  Parsec.char '.'
+  _ <- Parsec.char '.'
   d2 <- Parsec.many1 Parsec.digit
   return $ LispFloat (read (d1 ++ "." ++ d2))
 
 parseHex :: Parsec.Parser LispVal
 parseHex = do
-  Parsec.try $ Parsec.string "#x"
+  _ <- Parsec.try $ Parsec.string "#x"
   h <- Parsec.many1 Parsec.hexDigit
   return $ LispNumber $ hexToDecimal h
 
@@ -167,34 +168,34 @@ parseNumber__ =
 
 parseOct :: Parsec.Parser LispVal
 parseOct = do
-  Parsec.try $ Parsec.string "#o"
+  _ <- Parsec.try $ Parsec.string "#o"
   o <- Parsec.many1 Parsec.octDigit
   return $ LispNumber $ octalToDecimal o
 
 parseQuasiQuoted :: Parsec.Parser LispVal
 parseQuasiQuoted = do
-  Parsec.char '`'
+  _ <- Parsec.char '`'
   x <- parseExpr
   return $ LispList [LispAtom "quasiquote", x]
 
 parseQuoted :: Parsec.Parser LispVal
 parseQuoted = do
-  Parsec.char '\''
+  _ <- Parsec.char '\''
   x <- parseExpr
   return $ LispList [LispAtom "quote", x]
 
 parseString :: Parsec.Parser LispVal
 parseString = do
-  Parsec.char '"'
+  _ <- Parsec.char '"'
   x <- Parsec.many $ Parsec.many1 (Parsec.noneOf "\"\\") <|> parseEscapeChars
-  Parsec.char '"'
+  _ <- Parsec.char '"'
   return (LispString (concat x))
 
 parseString_ :: Parsec.Parser LispVal
 parseString_ = do
-  Parsec.char '"'
+  _ <- Parsec.char '"'
   x <- Parsec.many (Parsec.noneOf "\"")
-  Parsec.char '"'
+  _ <- Parsec.char '"'
   return (LispString x)
 
 spaces :: Parsec.Parser ()
@@ -205,7 +206,7 @@ symbol = Parsec.oneOf "!$%&|*+-/:<=>?@^_~"
 
 parseUnQuote :: Parsec.Parser LispVal
 parseUnQuote = do
-  Parsec.char ','
+  _ <- Parsec.char ','
   x <- parseExpr
   return $ LispList [LispAtom "unquote", x]
 
@@ -235,3 +236,12 @@ hexToDecimal hex = fst $ Numeric.readHex hex !! 0
 
 octalToDecimal :: String -> Integer
 octalToDecimal oct = fst $ Numeric.readOct oct !! 0
+
+{- showers -}
+showVal :: LispVal -> String
+showVal (LispString str) = "\"" ++ str ++ "\""
+showVal (LispAtom name) = name
+showVal (LispNumber num) = show num
+showVal (LispBool True) = "#t"
+showVal (LispBool False) = "#f"
+showVal _ = error "Show val for this type not implemented"
