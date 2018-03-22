@@ -23,16 +23,19 @@ data LispVal
   | LispString String
   | LispVector (Array.Array Int LispVal)
 
+instance Show LispVal where
+  show = showVal
+
 main :: IO ()
 main = do
   (expr:_) <- getArgs
-  putStrLn (readExpr expr)
+  print $ eval $ readExpr expr
 
-readExpr :: String -> String
+readExpr :: String -> LispVal
 readExpr input =
   case Parsec.parse parseExpr "lisp" input of
-    Left err -> "No match: " ++ show err
-    Right _val -> "Found Value"
+    Left err -> LispString $ "No match: " ++ show err
+    Right val -> val
 
 {- Parsers -}
 parseAtom :: Parsec.Parser LispVal
@@ -98,14 +101,13 @@ parseEscapeChars :: Parsec.Parser String
 parseEscapeChars = do
   _ <- Parsec.char '\\'
   x <- Parsec.oneOf "\"\\rnt"
-  return $
-    case x of
-      '\\' -> [x]
-      '"' -> [x]
-      't' -> "\t"
-      'n' -> "\n"
-      'r' -> "r"
-      _ -> error $ "Not a valid escape char: " ++ [x]
+  case x of
+    '\\' -> return [x]
+    '"' -> return [x]
+    't' -> return "\t"
+    'n' -> return "\n"
+    'r' -> return "r"
+    _ -> fail $ "Not a valid escape char: " ++ [x]
 
 parseExpr :: Parsec.Parser LispVal
 parseExpr =
@@ -217,7 +219,9 @@ parseVector = do
   return $
     LispVector (Array.listArray (0, (length arrayValues - 1)) arrayValues)
 
-{- converters -}
+{-
+  Converters
+-}
 binaryToDecimal :: String -> Integer
 binaryToDecimal = binaryToDecimal_ 0
 
@@ -237,11 +241,84 @@ hexToDecimal hex = fst $ Numeric.readHex hex !! 0
 octalToDecimal :: String -> Integer
 octalToDecimal oct = fst $ Numeric.readOct oct !! 0
 
-{- showers -}
+{-
+  Showers
+-}
 showVal :: LispVal -> String
 showVal (LispString str) = "\"" ++ str ++ "\""
 showVal (LispAtom name) = name
 showVal (LispNumber num) = show num
 showVal (LispBool True) = "#t"
 showVal (LispBool False) = "#f"
+showVal (LispList contents) = "(" ++ showVals contents ++ ")"
 showVal _ = error "Show val for this type not implemented"
+
+showVals :: [LispVal] -> String
+showVals vals = unwords $ map showVal vals
+
+{-
+  Evaluators
+-}
+eval :: LispVal -> LispVal
+eval val@(LispString _) = val
+eval val@(LispNumber _) = val
+eval val@(LispBool _) = val
+eval (LispList [LispAtom "quote", val]) = val
+eval (LispList (LispAtom func:args)) = apply func $ map eval args
+eval _ = error "Eval not completely implemented"
+
+apply :: String -> [LispVal] -> LispVal
+apply func args = maybe (LispBool False) ($ args) $ lookup func standardLib
+
+standardLib :: [(String, [LispVal] -> LispVal)]
+standardLib =
+  [ ("+", numericBinop (+)) --
+  , ("-", numericBinop (-))
+  , ("*", numericBinop (*))
+  , ("/", numericBinop div)
+  , ("mod", numericBinop mod)
+  , ("quotient", numericBinop quot)
+  , ("remainder", numericBinop rem)
+  , ("atom?", unaryOp is_atom)
+  , ("string?", unaryOp is_string)
+  , ("number?", unaryOp is_number)
+  , ("bool?", unaryOp is_bool)
+  , ("list?", unaryOp is_list)
+  ]
+
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop operation params =
+  case map unpackNum params of
+    x:xs -> LispNumber $ foldl operation x xs
+    _ -> error "Need 2 params for a numeric binop"
+
+unaryOp :: (LispVal -> LispVal) -> [LispVal] -> LispVal
+unaryOp operation [param] = operation param
+unaryOp _ params =
+  error $ "A unary operator expects a single argument, got: " ++ show params
+
+unpackNum :: LispVal -> Integer
+unpackNum (LispNumber n) = n
+unpackNum (LispList [n]) = unpackNum n
+unpackNum x = error ("Expected number, got: " ++ show x)
+
+is_atom :: LispVal -> LispVal
+is_atom (LispAtom _) = LispBool True
+is_atom _ = LispBool False
+
+is_number :: LispVal -> LispVal
+is_number (LispNumber _) = LispBool True
+is_number _ = LispBool False
+
+is_string :: LispVal -> LispVal
+is_string (LispString _) = LispBool True
+is_string _ = LispBool False
+
+is_list :: LispVal -> LispVal
+is_list (LispList _) = LispBool True
+is_list (LispDottedList _ _) = LispBool True
+is_list _ = LispBool False
+
+is_bool :: LispVal -> LispVal
+is_bool (LispBool _) = LispBool True
+is_bool _ = LispBool False
